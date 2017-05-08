@@ -88,7 +88,8 @@ func standardCoinbaseScript(nextBlockHeight int32, extraNonce uint64) ([]byte, e
 // createCoinbaseTx returns a coinbase transaction paying an appropriate
 // subsidy based on the passed block height to the provided address.
 func createCoinbaseTx(coinbaseScript []byte, nextBlockHeight int32,
-	addr btcutil.Address, net *chaincfg.Params) (*btcutil.Tx, error) {
+	addr btcutil.Address, mineTo []wire.TxOut,
+	net *chaincfg.Params) (*btcutil.Tx, error) {
 
 	// Create the script to pay to the provided payment address.
 	pkScript, err := txscript.PayToAddrScript(addr)
@@ -105,17 +106,23 @@ func createCoinbaseTx(coinbaseScript []byte, nextBlockHeight int32,
 		SignatureScript: coinbaseScript,
 		Sequence:        wire.MaxTxInSequenceNum,
 	})
-	tx.AddTxOut(&wire.TxOut{
-		Value:    blockchain.CalcBlockSubsidy(nextBlockHeight, net),
-		PkScript: pkScript,
-	})
+	if len(mineTo) == 0 {
+		tx.AddTxOut(&wire.TxOut{
+			Value:    blockchain.CalcBlockSubsidy(nextBlockHeight, net),
+			PkScript: pkScript,
+		})
+	} else {
+		for i := range mineTo {
+			tx.AddTxOut(&mineTo[i])
+		}
+	}
 	return btcutil.NewTx(tx), nil
 }
 
 // createBlock creates a new block building from the previous block.
 func createBlock(prevBlock *btcutil.Block, inclusionTxs []*btcutil.Tx,
-	blockVersion int32, blockTime time.Time,
-	miningAddr btcutil.Address, net *chaincfg.Params) (*btcutil.Block, error) {
+	blockVersion int32, blockTime time.Time, miningAddr btcutil.Address,
+	mineTo []wire.TxOut, net *chaincfg.Params) (*btcutil.Block, error) {
 
 	prevHash := prevBlock.Hash()
 	blockHeight := prevBlock.Height() + 1
@@ -137,7 +144,7 @@ func createBlock(prevBlock *btcutil.Block, inclusionTxs []*btcutil.Tx,
 		return nil, err
 	}
 	coinbaseTx, err := createCoinbaseTx(coinbaseScript, blockHeight,
-		miningAddr, net)
+		miningAddr, mineTo, net)
 	if err != nil {
 		return nil, err
 	}
