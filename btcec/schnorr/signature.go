@@ -180,7 +180,7 @@ func schnorrVerify(sig *Signature, hash []byte, pubKeyBytes []byte,
 	pBytes := SerializePubKey(pubKey)
 
 	commitment := chainhash.TaggedHash(
-		chainhash.TagBIP0340Challenge, rBytes[:], pBytes, hash,
+		opts.tagChallenge, rBytes[:], pBytes, hash,
 	)
 
 	var e btcec.ModNScalar
@@ -327,7 +327,7 @@ func schnorrSign(privKey, nonce *btcec.ModNScalar, pubKey *btcec.PublicKey, hash
 	// e = tagged_hash("BIP0340/challenge", bytes(R) || bytes(P) || m) mod n
 	pBytes := SerializePubKey(pubKey)
 	commitment := chainhash.TaggedHash(
-		chainhash.TagBIP0340Challenge, R.X.Bytes()[:], pBytes, hash,
+		opts.tagChallenge, R.X.Bytes()[:], pBytes, hash,
 	)
 
 	var e btcec.ModNScalar
@@ -349,7 +349,9 @@ func schnorrSign(privKey, nonce *btcec.ModNScalar, pubKey *btcec.PublicKey, hash
 	//
 	// If Verify(bytes(P), m, sig) fails, abort.
 	if !opts.fastSign {
-		var verifyOpts []SignOption
+		var verifyOpts = []SignOption{
+			CustomNonConsensusBIPTag(string(opts.tagBase)),
+		}
 		if opts.arbitrarySize {
 			verifyOpts = append(verifyOpts, ArbitrarySize())
 		}
@@ -384,11 +386,40 @@ type signOptions struct {
 	// arbitrarySize allows the user to signal that the message to be
 	// signed or verified is not 32 bytes in length.
 	arbitrarySize bool
+
+	// tagBase is the BIP base tag used for signing and verification
+	tagBase []byte
+
+	// tagNonce is the BIP nonce tag used for signing and verification
+	tagNonce []byte
+
+	//tagChallenge is the BIP challenge tag used for signing and verification
+	tagChallenge []byte
+
+	// tagAux is the BIP nonce tag used for signing and verification
+	tagAux []byte
 }
 
 // defaultSignOptions returns the default set of signing operations.
 func defaultSignOptions() *signOptions {
-	return &signOptions{}
+	return &signOptions{
+		tagBase:      []byte("BIP0340"),
+		tagAux:       chainhash.TagBIP0340Aux,
+		tagNonce:     chainhash.TagBIP0340Nonce,
+		tagChallenge: chainhash.TagBIP0340Challenge,
+	}
+}
+
+// CustomNonConsensusBIPTag allows non-consensus BIPs to specify a tag prefix
+// other than that used for BIP 340 to prevent signatures being acceped
+// on-chain. Useful for e.g. ChillDKG.
+func CustomNonConsensusBIPTag(baseTag string) SignOption {
+	return func(o *signOptions) {
+		o.tagBase = []byte(baseTag)
+		o.tagChallenge = []byte(baseTag + "/challenge")
+		o.tagNonce = []byte(baseTag + "/nonce")
+		o.tagAux = []byte(baseTag + "/aux")
+	}
 }
 
 // FastSign forces signing to skip the extra verification step at the end.
@@ -529,7 +560,7 @@ func Sign(privKey *btcec.PrivateKey, hash []byte,
 		// t = bytes(d) xor tagged_hash("BIP0340/aux", a)
 		privBytes := privKeyScalar.Bytes()
 		t := chainhash.TaggedHash(
-			chainhash.TagBIP0340Aux, (*opts.authNonce)[:],
+			opts.tagAux, (*opts.authNonce)[:],
 		)
 		for i := 0; i < len(t); i++ {
 			t[i] ^= privBytes[i]
@@ -542,7 +573,7 @@ func Sign(privKey *btcec.PrivateKey, hash []byte,
 		// We snip off the first byte of the serialized pubkey, as we
 		// only need the x coordinate and not the market byte.
 		rand := chainhash.TaggedHash(
-			chainhash.TagBIP0340Nonce, t[:], pubKeyBytes[1:], hash,
+			opts.tagNonce, t[:], pubKeyBytes[1:], hash,
 		)
 
 		// Step 8.
