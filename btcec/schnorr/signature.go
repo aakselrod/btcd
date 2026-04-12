@@ -114,7 +114,15 @@ func (sig Signature) IsEqual(otherSig *Signature) bool {
 // This differs from the exported Verify method in that it returns a specific
 // error to support better testing while the exported method simply returns a
 // bool indicating success or failure.
-func schnorrVerify(sig *Signature, hash []byte, pubKeyBytes []byte) error {
+func schnorrVerify(sig *Signature, hash []byte, pubKeyBytes []byte,
+	signOpts ...SignOption) error {
+
+	// First, parse the set of optional signing options.
+	opts := defaultSignOptions()
+	for _, option := range signOpts {
+		option(opts)
+	}
+
 	// The algorithm for producing a BIP-340 signature is described in
 	// README.md and is reproduced here for reference:
 	//
@@ -233,6 +241,15 @@ func (sig *Signature) Verify(hash []byte, pubKey *btcec.PublicKey) bool {
 	return schnorrVerify(sig, hash, pubkeyBytes) == nil
 }
 
+// VerifyCustom returns whether or not the signature is valid for the provided
+// hash and secp256k1 public key, and accepts custom options.
+func (sig *Signature) VerifyCustom(hash []byte, pubKey *btcec.PublicKey,
+	signOpts ...SignOption) bool {
+
+	pubkeyBytes := SerializePubKey(pubKey)
+	return schnorrVerify(sig, hash, pubkeyBytes, signOpts...) == nil
+}
+
 // zeroArray zeroes the memory of a scalar array.
 func zeroArray(a *[scalarSize]byte) {
 	for i := 0; i < scalarSize; i++ {
@@ -331,7 +348,8 @@ func schnorrSign(privKey, nonce *btcec.ModNScalar, pubKey *btcec.PublicKey, hash
 	//
 	// If Verify(bytes(P), m, sig) fails, abort.
 	if !opts.fastSign {
-		if err := schnorrVerify(sig, hash, pBytes); err != nil {
+		err := schnorrVerify(sig, hash, pBytes, opts.verifyOpts...)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -356,6 +374,10 @@ type signOptions struct {
 	// authNonce allows the user to pass in their own nonce information, which
 	// is useful for schemes like mu-sig.
 	authNonce *[32]byte
+
+	// verifyOpts is a way for options to add themselves for post-signing
+	// verification checks.
+	verifyOpts []SignOption
 }
 
 // defaultSignOptions returns the default set of signing operations.
